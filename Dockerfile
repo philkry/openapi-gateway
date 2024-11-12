@@ -8,7 +8,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application
 COPY openapi_gateway.py .
-COPY log_conf.yaml .
 
 # Set environment variables
 ENV OPENAPI_SPEC_PATH=/app/openapi.json
@@ -18,4 +17,4 @@ ENV UPSTREAM_SERVER_URL=https://example.com/api
 EXPOSE 8000
 
 # Run the application
-CMD ["uvicorn", "openapi_gateway:app", "--host", "0.0.0.0", "--port", "8000", "--log-config", "log_conf.yaml"]
+CMD ["uvicorn", "openapi_gateway:app", "--host", "0.0.0.0", "--port", "8000"]

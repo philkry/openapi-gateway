@@ -7,17 +7,42 @@ import httpx
 from openapi_spec_validator import validate_spec
 from jsonschema import validate as jsonschema_validate, ValidationError
 
-
 # Set up logging based on environment variable
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 
-# Configure logging to stdout
-logging.basicConfig(
-    level=log_level,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": True,
+    "formatters": {
+        "standard": {"format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s"},
+    },
+    "handlers": {
+        "default": {
+            "level": "INFO",
+            "formatter": "standard",
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",  # Default is stderr
+        },
+    },
+    "loggers": {
+        "": {  # root logger
+            "level": log_level, #"INFO",
+            "handlers": ["default"],
+            "propagate": False,
+        },
+        "uvicorn.error": {
+            "level": log_level,
+            "handlers": ["default"],
+        },
+        "uvicorn.access": {
+            "level": log_level,
+            "handlers": ["default"],
+        },
+    },
+}
+
+logging.config.dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()

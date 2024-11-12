@@ -7,6 +7,7 @@ import httpx
 from openapi_spec_validator import validate_spec
 from jsonschema import validate as jsonschema_validate, ValidationError
 
+
 # Set up logging based on environment variable
 log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
@@ -189,13 +190,33 @@ async def startup_event():
                 methods=[method.upper()],
             )
 
+def filter_headers(headers: dict) -> dict:
+    """Filter and clean response headers."""
+    # List of headers that should not be forwarded
+    excluded_headers = {
+        'server',
+        'transfer-encoding',
+        'content-encoding',  # We'll handle this separately based on actual content
+        'content-length',    # FastAPI will set this correctly
+    }
+    
+    return {
+        k: v for k, v in headers.items()
+        if k.lower() not in excluded_headers
+    }
+
 async def forward_request(request: Request) -> Response:
     upstream_url = os.getenv("UPSTREAM_SERVER_URL", "https://example.com/api")
     full_url = f"{upstream_url}{request.url.path}"
     if request.url.query:
         full_url = f"{full_url}?{request.url.query}"
 
-    headers = {key: value for key, value in request.headers.items() if key.lower() != 'host'}
+    # Forward all headers except 'host'
+    headers = {
+        key: value for key, value in request.headers.items()
+        if key.lower() != 'host'
+    }
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.request(
@@ -203,9 +224,22 @@ async def forward_request(request: Request) -> Response:
                 url=full_url,
                 headers=headers,
                 content=await request.body(),
-                timeout=30.0  # 30 second timeout for upstream requests
+                timeout=30.0,  # 30 second timeout for upstream requests
+                follow_redirects=True
             )
-        return Response(content=response.content, status_code=response.status_code, headers=dict(response.headers))
+
+            # Filter and clean response headers
+            cleaned_headers = filter_headers(dict(response.headers))
+            
+            # If the response has a content-type, preserve it
+            if 'content-type' in response.headers:
+                cleaned_headers['content-type'] = response.headers['content-type']
+
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=cleaned_headers
+            )
     except httpx.TimeoutException:
         logger.error(f"Timeout while forwarding request to upstream service: {full_url}")
         raise HTTPException(status_code=504, detail="Gateway Timeout - Upstream service took too long to respond")

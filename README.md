@@ -13,7 +13,10 @@ A FastAPI-based OpenAPI Gateway that provides request validation and forwarding 
 - **Dynamic Route Registration**: Automatically registers routes based on your OpenAPI specification
 - **Request Forwarding**: Forwards validated requests to your upstream service
 - **Comprehensive Logging**: Configurable logging levels for debugging and monitoring
-- **Docker Support**: Easy deployment using Docker
+- **Docker Support**: 
+  - Multi-architecture support (amd64, arm64)
+  - Container image signing with cosign
+  - Easy deployment using Docker
 
 ## Configuration
 
@@ -29,8 +32,13 @@ The OpenAPI Gateway is configured using environment variables:
 
 ### Using Pre-built Image
 
+The OpenAPI Gateway provides multi-architecture container images signed with cosign for enhanced security.
+
 ```bash
-# Pull the latest version
+# Verify image signature (optional but recommended)
+cosign verify ghcr.io/philkry/openapi-gateway:v1.0.0
+
+# Pull the latest version (automatically selects correct architecture)
 docker pull ghcr.io/philkry/openapi-gateway:v1.0.0
 
 # Run the container
@@ -42,6 +50,10 @@ docker run -d \
   ghcr.io/philkry/openapi-gateway:latest
 ```
 
+Supported architectures:
+- linux/amd64 (x86_64)
+- linux/arm64 (aarch64)
+
 ### Building Locally
 
 ```bash
@@ -49,8 +61,11 @@ docker run -d \
 git clone https://github.com/philkry/openapi-gateway.git
 cd openapi-gateway
 
-# Build the image
+# Build the image for your current architecture
 docker build -t openapi-gateway .
+
+# Or build for a specific architecture
+docker buildx build --platform linux/amd64,linux/arm64 -t openapi-gateway .
 
 # Run the container
 docker run -d \
@@ -150,8 +165,21 @@ git push origin v1.0.0
 ```
 
 2. The GitHub Action will automatically:
-   - Build the Docker image
-   - Push it to GitHub Container Registry with tags:
+   - Build multi-architecture Docker images (amd64, arm64)
+   - Sign the images using cosign
+   - Push to GitHub Container Registry with tags:
      * Full version (v1.0.0)
      * Minor version (v1.0)
      * Major version (v1)
+
+## Security
+
+### Container Image Signing
+
+All official container images are automatically signed using cosign during the build process. You can verify the signature before pulling:
+
+```bash
+cosign verify ghcr.io/philkry/openapi-gateway:v1.0.0
+```
+
+This ensures the integrity and authenticity of the container images you're using.

@@ -54,6 +54,92 @@ Supported architectures:
 - linux/amd64 (x86_64)
 - linux/arm64 (aarch64)
 
+## Kubernetes Deployment
+
+The OpenAPI Gateway includes health and readiness endpoints suitable for Kubernetes deployments:
+
+- `/health`: Liveness probe endpoint
+  - Returns 200 OK if the application is running
+  - Used by Kubernetes to determine if the pod should be restarted
+
+- `/ready`: Readiness probe endpoint
+  - Returns 200 OK if the gateway is ready to handle requests
+  - Verifies that the OpenAPI specification is loaded successfully
+  - Returns 503 Service Unavailable if not ready
+
+The gateway is designed to be resilient to upstream service issues:
+- Upstream service failures do not affect the gateway's health status
+- Gateway continues to operate and returns appropriate error codes:
+  - 504 Gateway Timeout: When upstream service is unreachable or too slow
+  - 502 Bad Gateway: For other upstream service errors
+
+Example Kubernetes deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openapi-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: openapi-gateway
+  template:
+    metadata:
+      labels:
+        app: openapi-gateway
+    spec:
+      containers:
+      - name: openapi-gateway
+        image: ghcr.io/jan/openapi-gateway:v1.0.0
+        ports:
+        - containerPort: 8000
+        env:
+        - name: UPSTREAM_SERVER_URL
+          value: "http://backend-service"
+        - name: LOG_LEVEL
+          value: "INFO"
+        volumeMounts:
+        - name: openapi-spec
+          mountPath: /app/openapi.json
+          subPath: openapi.json
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: openapi-spec
+        configMap:
+          name: openapi-spec
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openapi-gateway
+spec:
+  selector:
+    app: openapi-gateway
+  ports:
+  - port: 80
+    targetPort: 8000
+  type: ClusterIP
+```
+
+Create the OpenAPI spec ConfigMap:
+
+```bash
+kubectl create configmap openapi-spec --from-file=openapi.json
+```
+
 ### Building Locally
 
 ```bash

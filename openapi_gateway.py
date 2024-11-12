@@ -100,6 +100,44 @@ async def validate_request_body(request: Request, operation_def: dict):
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+@app.get("/health")
+async def health_check():
+    """
+    Basic health check endpoint for Kubernetes liveness probe.
+    Verifies that the application is running and can handle requests.
+    """
+    return {"status": "healthy"}
+
+@app.get("/ready")
+async def readiness_check():
+    """
+    Readiness check endpoint for Kubernetes readiness probe.
+    Verifies that the OpenAPI spec is loaded and the gateway can process requests.
+    """
+    try:
+        # Check if OpenAPI spec is loaded
+        if not hasattr(app, 'openapi_spec'):
+            return Response(
+                content=json.dumps({
+                    "status": "not ready",
+                    "reason": "OpenAPI specification not loaded"
+                }),
+                status_code=503,
+                media_type="application/json"
+            )
+
+        return {"status": "ready"}
+    except Exception as e:
+        logger.error(f"Readiness check failed: {str(e)}")
+        return Response(
+            content=json.dumps({
+                "status": "not ready",
+                "reason": str(e)
+            }),
+            status_code=503,
+            media_type="application/json"
+        )
+
 @app.on_event("startup")
 async def startup_event():
     openapi_spec_path = os.getenv("OPENAPI_SPEC_PATH", "openapi.json")
@@ -139,9 +177,16 @@ async def forward_request(request: Request) -> Response:
                 method=request.method,
                 url=full_url,
                 headers=headers,
-                content=await request.body()
+                content=await request.body(),
+                timeout=30.0  # 30 second timeout for upstream requests
             )
         return Response(content=response.content, status_code=response.status_code, headers=dict(response.headers))
+    except httpx.TimeoutException:
+        logger.error(f"Timeout while forwarding request to upstream service: {full_url}")
+        raise HTTPException(status_code=504, detail="Gateway Timeout - Upstream service took too long to respond")
+    except httpx.ConnectError:
+        logger.error(f"Failed to connect to upstream service: {full_url}")
+        raise HTTPException(status_code=504, detail="Gateway Timeout - Unable to connect to upstream service")
     except Exception as e:
         logger.error(f"Error forwarding request: {str(e)}")
         raise HTTPException(status_code=502, detail="Bad Gateway")

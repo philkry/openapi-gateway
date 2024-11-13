@@ -28,7 +28,7 @@ LOGGING_CONFIG = {
     },
     "loggers": {
         "": {  # root logger
-            "level": log_level, #"INFO",
+            "level": log_level,
             "handlers": ["default"],
             "propagate": False,
         },
@@ -86,24 +86,31 @@ def find_operation(path: str, method: str, spec: dict):
     return None
 
 def validate_parameters(request: Request, operation_def: dict):
+    """
+    Validate request parameters against OpenAPI specification.
+    Handles both required and optional parameters.
+    """
     query_params = dict(request.query_params)
     if 'parameters' in operation_def:
         for param in operation_def['parameters']:
             if param['in'] == 'query':
                 param_name = param['name']
+                is_required = param.get('required', False)  # Default to False if not specified
 
-                if param['required'] and param_name not in query_params:
+                # Check required parameters
+                if is_required and param_name not in query_params:
                     raise HTTPException(
                         status_code=400,
                         detail=f"Missing required query parameter: {param_name}"
                     )
 
-                if param_name in query_params:
-                    value = query_params[param_name]
-                    if 'enum' in param['schema'] and value not in param['schema']['enum']:
+                # Validate enum if parameter is present (regardless of required status)
+                if param_name in query_params and 'schema' in param:
+                    schema = param['schema']
+                    if 'enum' in schema and query_params[param_name] not in schema['enum']:
                         raise HTTPException(
                             status_code=400,
-                            detail=f"Invalid value for {param_name}. Must be one of: {', '.join(param['schema']['enum'])}"
+                            detail=f"Invalid value for {param_name}. Must be one of: {', '.join(schema['enum'])}"
                         )
 
 async def validate_request_body(request: Request, operation_def: dict):
@@ -205,17 +212,48 @@ def filter_headers(headers: dict) -> dict:
         if k.lower() not in excluded_headers
     }
 
+def get_proxy_headers(request: Request) -> dict:
+    """Generate proxy headers based on the incoming request."""
+    headers = {}
+    
+    # Get the client's IP address
+    client_host = request.client.host if request.client else None
+    forwarded_for = request.headers.get('x-forwarded-for')
+    
+    # If we already have X-Forwarded-For, append our client's IP
+    if forwarded_for and client_host:
+        headers['x-forwarded-for'] = f"{forwarded_for}, {client_host}"
+    elif client_host:
+        headers['x-forwarded-for'] = client_host
+        headers['x-real-ip'] = client_host
+
+    # Forward the original protocol
+    headers['x-forwarded-proto'] = request.url.scheme or 'http'
+    
+    # Forward the original host
+    if request.headers.get('host'):
+        headers['x-forwarded-host'] = request.headers['host']
+    
+    # Forward the original port
+    forwarded_port = request.url.port or (443 if request.url.scheme == 'https' else 80)
+    headers['x-forwarded-port'] = str(forwarded_port)
+
+    return headers
+
 async def forward_request(request: Request) -> Response:
     upstream_url = os.getenv("UPSTREAM_SERVER_URL", "https://example.com/api")
     full_url = f"{upstream_url}{request.url.path}"
     if request.url.query:
         full_url = f"{full_url}?{request.url.query}"
 
-    # Forward all headers except 'host'
-    headers = {
+    # Start with proxy headers
+    headers = get_proxy_headers(request)
+    
+    # Add original headers, except 'host'
+    headers.update({
         key: value for key, value in request.headers.items()
         if key.lower() != 'host'
-    }
+    })
 
     try:
         async with httpx.AsyncClient() as client:
